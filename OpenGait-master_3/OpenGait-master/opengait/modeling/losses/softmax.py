@@ -14,22 +14,35 @@ class CrossEntropyLoss(BaseLoss):
 
     def forward(self, logits, labels):
         """
-            logits: [n, c, p]
+            logits: [n, c]
             labels: [n]
         """
-        n, c, p = logits.size()
-        log_preds = F.log_softmax(logits * self.scale, dim=1)  # [n, c, p]
+        n, c = logits.size()
+        log_preds = F.log_softmax(logits, dim=1)  # [n, c]
         one_hot_labels = self.label2one_hot(
-            labels, c).unsqueeze(2).repeat(1, 1, p)  # [n, c, p]
+            labels, c)
+        # print('shape in softmax.py is {}'.format(one_hot_labels.shape))
+        # print('shape in softmax.py after unsqueeze is {}'.format(one_hot_labels.shape))
+        # print(labels,one_hot_labels)
         loss = self.compute_loss(log_preds, one_hot_labels)
+        # print('loss is {}'.format(loss))
         self.info.update({'loss': loss.detach().clone()})
         if self.log_accuracy:
-            pred = logits.argmax(dim=1)  # [n, p]
-            accu = (pred == labels.unsqueeze(1)).float().mean()
+            pred = logits.argmax(dim=-1)  # [n, p]
+
+            ## change
+            # print('in accu, pred shape is {} ,labels shape is {}'.format(pred.shape,labels.shape))
+            # print('pred is {}'.format(pred))
+            # print('labels is {}'.format(labels))
+            accu = (pred == labels).float().mean()
+            # print('acc is {}'.format(accu))
+            
+
             self.info.update({'accuracy': accu})
         return loss, self.info
 
     def compute_loss(self, predis, labels):
+        # print('in compute_loss, pred shape is {} ,labels shape is {}'.format(predis.shape,labels.shape))
         softmax_loss = -(labels * predis).sum(1)  # [n, p]
         losses = softmax_loss.mean(0)   # [p]
 
@@ -43,4 +56,5 @@ class CrossEntropyLoss(BaseLoss):
         label = label.unsqueeze(-1)
         batch_size = label.size(0)
         device = label.device
+        # print(batch_size,class_num,label)
         return torch.zeros(batch_size, class_num).to(device).scatter(1, label, 1)

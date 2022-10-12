@@ -51,7 +51,6 @@ model_cfg:
   edge: true
   align: true
   seg_lr: 0.00001
-  kernel_size: 3
 
 optimizer_cfg:
   lr: 0.0001

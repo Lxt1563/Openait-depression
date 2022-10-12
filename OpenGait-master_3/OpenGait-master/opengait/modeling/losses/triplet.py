@@ -19,9 +19,11 @@ class TripletLoss(BaseLoss):
         dist = self.ComputeDistance(embeddings, ref_embed)  # [p, n1, n2]
         mean_dist = dist.mean((1, 2))  # [p]
         ap_dist, an_dist = self.Convert2Triplets(labels, ref_label, dist)
+        # print('LZY the shape of ap_dist is {}, an_dist is {}'.format(ap_dist.shape,an_dist.shape))
         dist_diff = (ap_dist - an_dist).view(dist.size(0), -1)
+        # print('LZY the shape of dist_diff is {}'.format(dist_diff.shape))
         loss = F.relu(dist_diff + self.margin)
-
+        # print('LZY the shape of loss is {}'.format(loss.shape))
         hard_loss = torch.max(loss, -1)[0]
         loss_avg, loss_num = self.AvgNonZeroReducer(loss)
 

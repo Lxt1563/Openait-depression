@@ -46,6 +46,7 @@ model_cfg:
       - M
       - BC-128
       - BC-128
+      - M
       - BC-256
       - BC-256
       # - M
@@ -57,7 +58,7 @@ model_cfg:
     out_channels: 256
     parts_num: 16
   SeparateBNNecks:
-    class_num: 20000
+    class_num: 2
     in_channels: 256
     parts_num: 16
   bin_num:

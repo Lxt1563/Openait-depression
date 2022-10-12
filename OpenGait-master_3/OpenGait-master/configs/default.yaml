@@ -1,11 +1,11 @@
 data_cfg:
-  dataset_name: CASIA-B
-  dataset_root: your_path
+  dataset_name: processed_dataset
+  dataset_root: ../../dataset-pkl
   num_workers: 1
-  dataset_partition: ./datasets/CASIA-B/CASIA-B.json
+  dataset_partition: ./datasets/test_dataset/test_dataset_include_400.json
   remove_no_gallery: false
   cache: false
-  test_dataset_name: CASIA-B
+  test_dataset_name: processed_dataset
 
 evaluator_cfg:
   enable_float16: false
@@ -25,8 +25,8 @@ evaluator_cfg:
 loss_cfg:
   loss_term_weight: 1.0
   margin: 0.2
-  type: TripletLoss
-  log_prefix: triplet
+  type: CrossEntropyLoss
+  log_prefix: softmax
 
 model_cfg:
   model: Baseline
@@ -61,13 +61,12 @@ trainer_cfg:
   sampler:
     batch_shuffle: false
     batch_size:
-      - 8
-      - 16
+      - 128
     frames_num_fixed: 30
     frames_num_max: 50
     frames_num_min: 25
-    sample_type: fixed_unordered
-    type: TripletSampler
+    sample_type: fixed_unordcered
+    type: InferenceSampler
   transform:
     - img_w: 64
       type: BaseSilCuttingTransform

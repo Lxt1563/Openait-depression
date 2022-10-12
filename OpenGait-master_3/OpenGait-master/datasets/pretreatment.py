@@ -35,7 +35,14 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
         if dataset == 'GREW':
             to_pickle.append(img.astype('uint8'))
             continue
-
+        # logging.info(f'Reading sid {sinfo[0]}, seq {sinfo[1]}, view {sinfo[2]} from {img_file}')
+        # print('---------------------')
+        # print(img)
+        # print(img.sum())
+        try:
+            img.sum()
+        except:
+            print(f'Reading sid {sinfo[0]}, seq {sinfo[1]}, view {sinfo[2]} from {img_file}')
         if img.sum() <= 10000:
             if verbose:
                 logging.debug(f'Image sum: {img.sum()}')
