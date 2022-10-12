@@ -2,7 +2,7 @@ import torch
 
 from ..base_model import BaseModel
 from ..modules import SetBlockWrapper, HorizontalPoolingPyramid, PackSequenceWrapper, SeparateFCs, SeparateBNNecks
-
+import matplotlib.pyplot as plt
 
 class Baseline(BaseModel):
 
@@ -20,7 +20,8 @@ class Baseline(BaseModel):
         sils = ipts[0]
         if len(sils.size()) == 4:
             sils = sils.unsqueeze(1)
-
+        # np.save('./pics/rawpic')
+        # print('input size is {}',format(sils.shape))
         del ipts
         outs = self.Backbone(sils)  # [n, c, s, h, w]
 
@@ -29,21 +30,29 @@ class Baseline(BaseModel):
         # Horizontal Pooling Matching, HPM
         feat = self.HPP(outs)  # [n, c, p]
 
-        embed_1 = self.FCs(feat)  # [n, c, p]
-        embed_2, logits = self.BNNecks(embed_1)  # [n, c, p]
-        embed = embed_1
+        embed_1 = self.FCs(feat)  # [n, c]
+        #[ n,c,p]
 
+        embed_2, logits = self.BNNecks(embed_1)  # [n, c, p]
+        #[logits: batchsize,2]
+
+
+        # embed = embed_1
+        
         n, _, s, h, w = sils.size()
+        # print(embed.shape)
+        
         retval = {
             'training_feat': {
-                'triplet': {'embeddings': embed_1, 'labels': labs},
+                # 'triplet': {'embeddings': embed_1, 'labels': labs},
                 'softmax': {'logits': logits, 'labels': labs}
             },
             'visual_summary': {
                 'image/sils': sils.view(n*s, 1, h, w)
             },
             'inference_feat': {
-                'embeddings': embed
+                 'embeddings': logits
+                 # 'embeddings': embed
             }
         }
         return retval

@@ -105,6 +105,7 @@ class SeparateFCs(nn.Module):
         else:
             out = x.matmul(self.fc_bin)
         return out.permute(1, 2, 0).contiguous()
+        
 
 
 class SeparateBNNecks(nn.Module):
@@ -147,7 +148,7 @@ class SeparateBNNecks(nn.Module):
                 self.fc_bin, dim=1))  # [p, n, c]
         else:
             logits = feature.matmul(self.fc_bin)
-        return feature.permute(1, 2, 0).contiguous(), logits.permute(1, 2, 0).contiguous()
+        return feature.permute(1, 2, 0).contiguous(), logits.permute(1, 2, 0).contiguous().max(-1)[0]
 
 
 class FocalConv2d(nn.Module):

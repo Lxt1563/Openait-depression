@@ -21,6 +21,7 @@ from torch.cuda.amp import autocast
 from torch.cuda.amp import GradScaler
 from abc import ABCMeta
 from abc import abstractmethod
+from torchsummary import summary
 
 from . import backbones
 from .loss_aggregator import LossAggregator
@@ -33,6 +34,7 @@ from utils import get_valid_args, is_list, is_dict, np2var, ts2np, list2var, get
 from utils import evaluation as eval_functions
 from utils import NoOp
 from utils import get_msg_mgr
+import torch.nn.functional as F
 
 __all__ = ['BaseModel']
 
@@ -202,12 +204,13 @@ class BaseModel(MetaModel, nn.Module):
     def get_loader(self, data_cfg, train=True):
         sampler_cfg = self.cfgs['trainer_cfg']['sampler'] if train else self.cfgs['evaluator_cfg']['sampler']
         dataset = DataSet(data_cfg, train)
-
+        print(f'size of dataset is {len(dataset)}')
         Sampler = get_attr_from([Samplers], sampler_cfg['type'])
         vaild_args = get_valid_args(Sampler, sampler_cfg, free_keys=[
             'sample_type', 'type'])
+        print(vaild_args)
         sampler = Sampler(dataset, **vaild_args)
-
+        print(f'size of sampler is {len(sampler)}')
         loader = tordata.DataLoader(
             dataset=dataset,
             batch_sampler=sampler,
@@ -218,6 +221,7 @@ class BaseModel(MetaModel, nn.Module):
     def get_optimizer(self, optimizer_cfg):
         self.msg_mgr.log_info(optimizer_cfg)
         optimizer = get_attr_from([optim], optimizer_cfg['solver'])
+        # print(optimizer,optimizer_cfg)
         valid_arg = get_valid_args(optimizer, optimizer_cfg, ['solver'])
         optimizer = optimizer(
             filter(lambda p: p.requires_grad, self.parameters()), **valid_arg)
@@ -345,6 +349,9 @@ class BaseModel(MetaModel, nn.Module):
             # Warning caused by optimizer skip when NaN
             # https://discuss.pytorch.org/t/optimizer-step-before-lr-scheduler-step-error-using-gradscaler/92930/5
             if scale != self.Scaler.get_scale():
+                # lzreal add test
+                print("Training step skip. Expected the former scale equals to the present, got {} and {}".format(
+                    scale, self.Scaler.get_scale()))
                 self.msg_mgr.log_debug("Training step skip. Expected the former scale equals to the present, got {} and {}".format(
                     scale, self.Scaler.get_scale()))
                 return False
@@ -353,6 +360,7 @@ class BaseModel(MetaModel, nn.Module):
             self.optimizer.step()
 
         self.iteration += 1
+        # print(self.iteration)
         self.scheduler.step()
         return True
 
@@ -372,12 +380,34 @@ class BaseModel(MetaModel, nn.Module):
         batch_size = self.test_loader.batch_sampler.batch_size
         rest_size = total_size
         info_dict = Odict()
+        preds_tensor,labels_tensor=None,None
         for inputs in self.test_loader:
             ipts = self.inputs_pretreament(inputs)
+            # print(len(ipts[0][0]))
             with autocast(enabled=self.engine_cfg['enable_float16']):
                 retval = self.forward(ipts)
                 inference_feat = retval['inference_feat']
+                labels=retval['training_feat']['softmax']['labels']
                 for k, v in inference_feat.items():
+                    # print(v)
+                    # softmax
+                    tmp=F.log_softmax(v,dim=-1)
+                    pred = tmp.argmax(dim=-1)
+                    if(preds_tensor is None):
+                        preds_tensor=pred
+                        labels_tensor=labels
+                    else:
+                        preds_tensor=torch.cat((preds_tensor,pred),0)
+                        labels_tensor=torch.cat((labels_tensor,labels),0)
+                    # print(pred.size())
+                    # print(labels.unsqueeze(1).size())
+                    # print(pred == labels.unsqueeze(1))
+                    # print((pred == labels.unsqueeze(1)).float())
+                    # print((pred == labels.unsqueeze(1)).float().mean())
+                    # accu = (pred == labels.unsqueeze(1)).float().mean()
+                    # print('xiugai....----------------------------------')
+                    # print('test accuracy is {}'.format(accu))
+                    # print(v)
                     inference_feat[k] = ddp_all_gather(v, requires_grad=False)
                 del retval
             for k, v in inference_feat.items():
@@ -390,29 +420,62 @@ class BaseModel(MetaModel, nn.Module):
                 update_size = total_size % batch_size
             pbar.update(update_size)
         pbar.close()
+        # print(preds_tensor.size(),labels_tensor.size())
+        # print(preds_tensor == labels_tensor.unsqueeze(1))
+        # t_count=0
+        # total_count=0
+        t_f_metrix = (preds_tensor == labels_tensor).float().mean()
+        # for item in t_f_metrix:
+        #     tmp=max(set(item),key=item.count)
+        #     if(tmp==1.):
+        #         t_count+=1
+        #     total_count+=1
+        print('xiugai....----------------------------------')
+        print('test accuracy is {}'.format(t_f_metrix))
+
         for k, v in info_dict.items():
             v = np.concatenate(v)[:total_size]
             info_dict[k] = v
+        # print(info_dict['embeddings'][0])
         return info_dict
+        # print(info_dict.shape[0])
 
     @ staticmethod
     def run_train(model):
         """Accept the instance object(model) here, and then run the train loop."""
-        for inputs in model.train_loader:
+        # print(len(model.train_loader))
+        index=0
+        # last_inputs=None
+
+        ##change
+        # print(len(model.train_loader))
+        tmp_iter=model.train_loader
+        for inputs in tmp_iter:
+            # print(inputs)
+            index+=1
+            ## change
+            # print(f'index is {index}')
             ipts = model.inputs_pretreament(inputs)
             with autocast(enabled=model.engine_cfg['enable_float16']):
                 retval = model(ipts)
+                # last_inputs=ipts
                 training_feat, visual_summary = retval['training_feat'], retval['visual_summary']
                 del retval
+            # print(training_feat)
+            # print('1')
             loss_sum, loss_info = model.loss_aggregator(training_feat)
+            # print('2')
             ok = model.train_step(loss_sum)
+            # print('3')
             if not ok:
                 continue
-
+            # print('4')
             visual_summary.update(loss_info)
+            # print('5')
             visual_summary['scalar/learning_rate'] = model.optimizer.param_groups[0]['lr']
 
             model.msg_mgr.train_step(loss_info, visual_summary)
+            # print('6')
             if model.iteration % model.engine_cfg['save_iter'] == 0:
                 # save the checkpoint
                 model.save_ckpt(model.iteration)
@@ -425,11 +488,21 @@ class BaseModel(MetaModel, nn.Module):
                     model.train()
                     if model.cfgs['trainer_cfg']['fix_BN']:
                         model.fix_BN()
-                    model.msg_mgr.write_to_tensorboard(result_dict)
+                    if result_dict is not None:
+                        model.msg_mgr.write_to_tensorboard(result_dict)
                     model.msg_mgr.reset_time()
-            if model.iteration >= model.engine_cfg['total_iter']:
-                break
+            # print('7')
 
+            ## change
+            # print(f'iteration is {model.iteration}')
+            if model.iteration >= model.engine_cfg['total_iter']:
+                print('error in total_iteration: {} \t {}'.format(model.iteration,model.engine_cfg['total_iter']))
+                break
+        print(f'train over, train loader is {len(model.train_loader)},iteration is {model.iteration}, total iter is {model.engine_cfg["total_iter"]}')
+        # model.eval()
+        # features=model.features(last_inputs)
+        # print(features)
+        
     @ staticmethod
     def run_test(model):
         """Accept the instance object(model) here, and then run the test loop."""
@@ -437,24 +510,24 @@ class BaseModel(MetaModel, nn.Module):
         rank = torch.distributed.get_rank()
         with torch.no_grad():
             info_dict = model.inference(rank)
-        if rank == 0:
-            loader = model.test_loader
-            label_list = loader.dataset.label_list
-            types_list = loader.dataset.types_list
-            views_list = loader.dataset.views_list
+        # if rank == 0:
+        #     loader = model.test_loader
+        #     label_list = loader.dataset.label_list
+        #     types_list = loader.dataset.types_list
+        #     views_list = loader.dataset.views_list
 
-            info_dict.update({
-                'labels': label_list, 'types': types_list, 'views': views_list})
+        #     info_dict.update({
+        #         'labels': label_list, 'types': types_list, 'views': views_list})
 
-            if 'eval_func' in model.cfgs["evaluator_cfg"].keys():
-                eval_func = model.cfgs['evaluator_cfg']["eval_func"]
-            else:
-                eval_func = 'identification'
-            eval_func = getattr(eval_functions, eval_func)
-            valid_args = get_valid_args(
-                eval_func, model.cfgs["evaluator_cfg"], ['metric'])
-            try:
-                dataset_name = model.cfgs['data_cfg']['test_dataset_name']
-            except:
-                dataset_name = model.cfgs['data_cfg']['dataset_name']
-            return eval_func(info_dict, dataset_name, **valid_args)
+        #     if 'eval_func' in model.cfgs["evaluator_cfg"].keys():
+        #         eval_func = model.cfgs['evaluator_cfg']["eval_func"]
+        #     else:
+        #         eval_func = 'identification'
+        #     eval_func = getattr(eval_functions, eval_func)
+        #     valid_args = get_valid_args(
+        #         eval_func, model.cfgs["evaluator_cfg"], ['metric'])
+        #     try:
+        #         dataset_name = model.cfgs['data_cfg']['test_dataset_name']
+        #     except:
+        #         dataset_name = model.cfgs['data_cfg']['dataset_name']
+        #     return eval_func(info_dict, dataset_name, **valid_args)

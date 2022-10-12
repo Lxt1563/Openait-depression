@@ -40,112 +40,88 @@ def de_diag(acc, each_angle=False):
 # Modified From https://github.com/AbnerHqC/GaitSet/blob/master/model/utils/evaluator.py
 
 
-def check_is_true_label(x,y):
-    true_predict=0
-    label_dic={'D':0,'N':1}
-    for i_index in range(len(y)):
-        # for b_index in range(len(x[i_index][0])):
-        # tmp=np.sum(x[i_index][0],-1*x[i_index][1],axis=0)
-        tmp_labels=[0 if a>b else 1 for a,b in zip(x[i_index][0],x[i_index][1])]
-        predict_label=max(tmp_labels,key=tmp_labels.count)
-        if(predict_label==label_dic[y[i_index]]):
-            true_predict+=1
-        # true_predict.append(predict_label)
-    return true_predict
-            
-
 def identification(data, dataset, metric='euc'):
-    '''
-    pred = feature.argmax(dim=1)
-    accu = (pred == labels.unsqueeze(1)).float().mean()
-    print('test accuracy is {}'.format(accu))
-    return {}
-    '''
     msg_mgr = get_msg_mgr()
     feature, label, seq_type, view = data['embeddings'], data['labels'], data['types'], data['views']
     label = np.array(label)
-    # add softmax() 
-    # scale=2**4
-    # print(feature.size())
-    # feature=F.log_softmax(feature * scale , dim=1)
     view_list = list(set(view))
     view_list.sort()
     view_num = len(view_list)
     # sample_num = len(feature)
-    print('label list len is {}, is {}'.format(len(list(label)),label))
-    print('view list len is {}, is {}'.format(view_num,view_list))
-    probe_seq_dict = {'CASIA-B': [['nm-05', 'nm-06'], ['bg-01', 'bg-02'], ['cl-01', 'cl-02']],'processed_dataset':[['bg'],['nm-2']],
+
+    probe_seq_dict = {'CASIA-B': [['nm-05', 'nm-06'], ['bg-01', 'bg-02'], ['cl-01', 'cl-02']],'processed_dataset':[['0','1','2','3'],['20','21','22','23','24','25'],['5','7','9','11','13','15','17','19']],
                       'OUMVLP': [['00']]}
 
-    gallery_seq_dict = {'CASIA-B': [['nm-01', 'nm-02', 'nm-03', 'nm-04']],'processed_dataset':[['nm-1']],
+    gallery_seq_dict = {'CASIA-B': [['nm-01', 'nm-02', 'nm-03', 'nm-04']],'processed_dataset':[['4','6','8','10','12','14','16','18']],
                         'OUMVLP': [['01']]}
     if dataset not in (probe_seq_dict or gallery_seq_dict):
         raise KeyError("DataSet %s hasn't been supported !" % dataset)
     num_rank = 5
     acc = np.zeros([len(probe_seq_dict[dataset]),
                     view_num, view_num, num_rank]) - 1.
-    c_index=0
     for (p, probe_seq) in enumerate(probe_seq_dict[dataset]):
         for gallery_seq in gallery_seq_dict[dataset]:
             for (v1, probe_view) in enumerate(view_list):
                 for (v2, gallery_view) in enumerate(view_list):
-                    c_index+=1
-                    true_predict=0
-                    # gseq_mask = np.isin(seq_type, gallery_seq) & np.isin(
-                    #     view, [gallery_view])
-                    # gallery_x = feature[gseq_mask, :]
-                    # gallery_y = label[gseq_mask]
-                    # true_predict+=check_is_true_label(gallery_x,gallery_y)
+                    gseq_mask = np.isin(seq_type, gallery_seq) & np.isin(
+                        view, [gallery_view])
+                    # print('seq_type is {}'.format(seq_type))
+                    # print('gallery_seq is {}'.format(gallery_seq))
+                    # print('view is {}'.format(view))
+                    # print('gallery_view is {}'.format(gallery_view))
+                    gallery_x = feature[gseq_mask, :]
+                    gallery_y = label[gseq_mask]
 
                     pseq_mask = np.isin(seq_type, probe_seq) & np.isin(
                         view, [probe_view])
                     probe_x = feature[pseq_mask, :]
                     probe_y = label[pseq_mask]
-                    true_predict+=check_is_true_label(probe_x,probe_y)
-
-                    # dist = cuda_dist(probe_x, gallery_x, metric)
-                    # idx = dist.sort(1)[1].cpu().numpy()
-                    # acc[p, v1, v2, :] = np.round(
-                    #     np.sum(np.cumsum(np.reshape(probe_y, [-1, 1]) == gallery_y[idx[:, 0:num_rank]], 1) > 0,
-                    #            0) * 100 / dist.shape[0], 2)
-                    acc[p, v1, v2, :] = np.round(true_predict/(len(probe_y)),2)
+                    # print(probe_y)
+                    # print('gallery_y is {}'.format(gallery_y))
+                    dist = cuda_dist(probe_x, gallery_x, metric)
+                    idx = dist.sort(1)[1].cpu().numpy()
+                    acc[p, v1, v2, :] = np.round(
+                        np.sum(np.cumsum(np.reshape(probe_y, [-1, 1]) == gallery_y[idx[:, 0:num_rank]], 1) > 0,
+                               0) * 100 / dist.shape[0], 2)
     result_dict = {}
-    print('c_index is {}'.format(c_index))
     np.set_printoptions(precision=3, suppress=True)
     if 'OUMVLP' not in dataset:
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d (Include identical-view cases)===' % (i + 1))
-            # print(acc)
-            msg_mgr.log_info('bg: %.3f,\tnm-2: %.3f' % (
+            print(acc)
+            msg_mgr.log_info('NM: %.3f,\tBG: %.3f,\tCL: %.3f' % (
                 np.mean(acc[0, :, :, i]),
-                np.mean(acc[1, :, :, i])))
+                np.mean(acc[1, :, :, i]),
+                np.mean(acc[2, :, :, i])))
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d (Exclude identical-view cases)===' % (i + 1))
-            msg_mgr.log_info('bg: %.3f,\tnm-2: %.3f' % (
+            msg_mgr.log_info('NM: %.3f,\tBG: %.3f,\tCL: %.3f' % (
                 de_diag(acc[0, :, :, i]),
-                de_diag(acc[1, :, :, i])))
-        result_dict["scalar/test_accuracy/bg"] = de_diag(acc[0, :, :, i])
-        result_dict["scalar/test_accuracy/nm-2"] = de_diag(acc[1, :, :, i])
-        # result_dict["scalar/test_accuracy/ANGLE:5-19"] = de_diag(acc[2, :, :, i])
+                de_diag(acc[1, :, :, i]),
+                de_diag(acc[2, :, :, i])))
+        result_dict["scalar/test_accuracy/NM"] = de_diag(acc[0, :, :, i])
+        result_dict["scalar/test_accuracy/BG"] = de_diag(acc[1, :, :, i])
+        result_dict["scalar/test_accuracy/CL"] = de_diag(acc[2, :, :, i])
         np.set_printoptions(precision=2, floatmode='fixed')
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d of each angle (Exclude identical-view cases)===' % (i + 1))
-            msg_mgr.log_info('bg: {}'.format(de_diag(acc[0, :, :, i], True)))
-            msg_mgr.log_info('nm-2: {}'.format(de_diag(acc[1, :, :, i], True)))
-            # msg_mgr.log_info('ANGLE:5-19: {}'.format(de_diag(acc[2, :, :, i], True)))
+            msg_mgr.log_info('NM: {}'.format(de_diag(acc[0, :, :, i], True)))
+            msg_mgr.log_info('BG: {}'.format(de_diag(acc[1, :, :, i], True)))
+            msg_mgr.log_info('CL: {}'.format(de_diag(acc[2, :, :, i], True)))
     else:
         msg_mgr.log_info('===Rank-1 (Include identical-view cases)===')
-        msg_mgr.log_info('bg: %.3f ' % (np.mean(acc[0, :, :, 0])))
+        msg_mgr.log_info('NM: %.3f ' % (np.mean(acc[0, :, :, 0])))
         msg_mgr.log_info('===Rank-1 (Exclude identical-view cases)===')
-        msg_mgr.log_info('bg: %.3f ' % (de_diag(acc[0, :, :, 0])))
+        msg_mgr.log_info('NM: %.3f ' % (de_diag(acc[0, :, :, 0])))
         msg_mgr.log_info(
             '===Rank-1 of each angle (Exclude identical-view cases)===')
-        msg_mgr.log_info('bg: {}'.format(de_diag(acc[0, :, :, 0], True)))
-        result_dict["scalar/test_accuracy/bg"] = de_diag(acc[0, :, :, 0])
+        msg_mgr.log_info('NM: {}'.format(de_diag(acc[0, :, :, 0], True)))
+        result_dict["scalar/test_accuracy/NM"] = de_diag(acc[0, :, :, 0])
     return result_dict
+
 
 def identification_real_scene(data, dataset, metric='euc'):
     msg_mgr = get_msg_mgr()

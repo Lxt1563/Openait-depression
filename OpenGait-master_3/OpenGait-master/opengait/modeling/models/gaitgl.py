@@ -193,7 +193,7 @@ class GaitGL(BaseModel):
                 'image/sils': sils.view(n*s, 1, h, w)
             },
             'inference_feat': {
-                'embeddings': embed
+                'embeddings': bnft
             }
         }
         return retval

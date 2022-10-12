@@ -50,6 +50,8 @@ class TripletSampler(tordata.sampler.Sampler):
 
 
 def sync_random_sample_list(obj_list, k):
+    # print(f"k is {k}")
+    # print(f"obj_list is {obj_list}")
     if len(obj_list) < k:
         idx = random.choices(range(len(obj_list)), k=k)
         idx = torch.tensor(idx)
@@ -63,16 +65,21 @@ def sync_random_sample_list(obj_list, k):
 
 
 class InferenceSampler(tordata.sampler.Sampler):
-    def __init__(self, dataset, batch_size):
+    def __init__(self, dataset, batch_size, is_training=True):
         self.dataset = dataset
         self.batch_size = batch_size
-
+        self.is_training=is_training
+        print(self.is_training)
         self.size = len(dataset)
+
         indices = list(range(self.size))
 
         world_size = dist.get_world_size()
-        rank = dist.get_rank()
+        self.world_size = world_size
 
+        rank = dist.get_rank()
+        # print(rank)
+        self.rank=rank
         if batch_size % world_size != 0:
             raise ValueError("World size ({}) is not divisible by batch_size ({})".format(
                 world_size, batch_size))
@@ -93,7 +100,28 @@ class InferenceSampler(tordata.sampler.Sampler):
         self.idx_batch_this_rank = indx_batch_per_rank[rank::world_size]
 
     def __iter__(self):
-        yield from self.idx_batch_this_rank
+        if(self.is_training):
+            while True:
+                sample_indices = []
+                # print(self.dataset.label_set)
+                for pid in self.dataset.label_set:
+                    indices=self.dataset.indices_dict[pid]
+                    indices=sync_random_sample_list(indices,k=int(self.batch_size/2))
+                    sample_indices += indices
+                sample_indices = sync_random_sample_list(
+                    sample_indices, len(sample_indices))
+                total_batch_size = self.batch_size
+                total_size = int(math.ceil(total_batch_size /
+                                            self.world_size)) * self.world_size
+                sample_indices += sample_indices[:(
+                    total_batch_size - len(sample_indices))]
+
+                sample_indices = sample_indices[self.rank:total_size:self.world_size]
+                yield sample_indices
+        else:
+        # print("Inference_rank",self.idx_batch_this_rank)
+            yield from self.idx_batch_this_rank
+        # print("Inference_rank",self.idx_batch_this_rank)
 
     def __len__(self):
         return len(self.dataset)

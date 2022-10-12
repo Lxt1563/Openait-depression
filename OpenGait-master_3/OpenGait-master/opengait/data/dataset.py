@@ -14,17 +14,17 @@ class DataSet(tordata.Dataset):
         """
         self.__dataset_parser(data_cfg, training)
         self.cache = data_cfg['cache']
-        self.label_list = [seq_info[0] for seq_info in self.seqs_info]
+        self.label_list = [seq_info[0].split('_')[0] for seq_info in self.seqs_info]
         self.types_list = [seq_info[1] for seq_info in self.seqs_info]
         self.views_list = [seq_info[2] for seq_info in self.seqs_info]
-
+        # print(' aaaaaaa : {}'.format(self.label_list))
         self.label_set = sorted(list(set(self.label_list)))
         self.types_set = sorted(list(set(self.types_list)))
         self.views_set = sorted(list(set(self.views_list)))
         self.seqs_data = [None] * len(self)
         self.indices_dict = {label: [] for label in self.label_set}
         for i, seq_info in enumerate(self.seqs_info):
-            self.indices_dict[seq_info[0]].append(i)
+            self.indices_dict[seq_info[0].split('_')[0]].append(i)
         if self.cache:
             self.__load_all_data()
 
@@ -75,6 +75,7 @@ class DataSet(tordata.Dataset):
 
         with open(data_config['dataset_partition'], "rb") as f:
             partition = json.load(f)
+        # print(partition)
         train_set = partition["TRAIN_SET"]
         test_set = partition["TEST_SET"]
         label_list = os.listdir(dataset_root)
