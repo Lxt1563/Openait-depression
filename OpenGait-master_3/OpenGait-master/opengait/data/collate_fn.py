@@ -41,7 +41,14 @@ class CollateFn(object):
 
         for bt in batch:
             seqs_batch.append(bt[0])
-            labs_batch.append(self.label_set.index(bt[1][0].split('_')[0]))
+            # labs_batch.append(self.label_set.index(bt[1][0]))
+            if bt[1][0].startswith('D_'):
+                labs_batch.append(0)
+            elif bt[1][0].startswith('N_'):
+                labs_batch.append(1)
+            else:
+                print('Illegal Label')
+                os._exit()
             typs_batch.append(bt[1][1])
             vies_batch.append(bt[1][2])
 

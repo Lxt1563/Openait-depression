@@ -3,27 +3,27 @@ from time import strftime, localtime
 import torch
 import numpy as np
 import torch.nn.functional as F
-from utils import get_msg_mgr, mkdir, MeanIOU
+from utils import get_msg_mgr, mkdir
 
 
 def cuda_dist(x, y, metric='euc'):
     x = torch.from_numpy(x).cuda()
     y = torch.from_numpy(y).cuda()
     if metric == 'cos':
-        x = F.normalize(x, p=2, dim=1)  # n c p
-        y = F.normalize(y, p=2, dim=1)  # n c p
-    num_bin = x.size(2)
+        x = F.normalize(x, p=2, dim=2)  # n p c
+        y = F.normalize(y, p=2, dim=2)  # n p c
+    num_bin = x.size(1)
     n_x = x.size(0)
     n_y = y.size(0)
     dist = torch.zeros(n_x, n_y).cuda()
     for i in range(num_bin):
-        _x = x[:, :, i]
-        _y = y[:, :, i]
+        _x = x[:, i, ...]
+        _y = y[:, i, ...]
         if metric == 'cos':
             dist += torch.matmul(_x, _y.transpose(0, 1))
         else:
             _dist = torch.sum(_x ** 2, 1).unsqueeze(1) + torch.sum(_y ** 2, 1).unsqueeze(
-                0) - 2 * torch.matmul(_x, _y.transpose(0, 1))
+                1).transpose(0, 1) - 2 * torch.matmul(_x, _y.transpose(0, 1))
             dist += torch.sqrt(F.relu(_dist))
     return 1 - dist/num_bin if metric == 'cos' else dist / num_bin
 
@@ -40,112 +40,82 @@ def de_diag(acc, each_angle=False):
 # Modified From https://github.com/AbnerHqC/GaitSet/blob/master/model/utils/evaluator.py
 
 
-def check_is_true_label(x,y):
-    true_predict=0
-    label_dic={'D':0,'N':1}
-    for i_index in range(len(y)):
-        # for b_index in range(len(x[i_index][0])):
-        # tmp=np.sum(x[i_index][0],-1*x[i_index][1],axis=0)
-        tmp_labels=[0 if a>b else 1 for a,b in zip(x[i_index][0],x[i_index][1])]
-        predict_label=max(tmp_labels,key=tmp_labels.count)
-        if(predict_label==label_dic[y[i_index]]):
-            true_predict+=1
-        # true_predict.append(predict_label)
-    return true_predict
-            
-
 def identification(data, dataset, metric='euc'):
-    '''
-    pred = feature.argmax(dim=1)
-    accu = (pred == labels.unsqueeze(1)).float().mean()
-    print('test accuracy is {}'.format(accu))
-    return {}
-    '''
     msg_mgr = get_msg_mgr()
     feature, label, seq_type, view = data['embeddings'], data['labels'], data['types'], data['views']
     label = np.array(label)
-    # add softmax() 
-    # scale=2**4
-    # print(feature.size())
-    # feature=F.log_softmax(feature * scale , dim=1)
     view_list = list(set(view))
     view_list.sort()
     view_num = len(view_list)
     # sample_num = len(feature)
-    print('label list len is {}, is {}'.format(len(list(label)),label))
-    print('view list len is {}, is {}'.format(view_num,view_list))
-    probe_seq_dict = {'CASIA-B': [['nm-05', 'nm-06'], ['bg-01', 'bg-02'], ['cl-01', 'cl-02']],'processed_dataset':[['bg'],['nm-2']],
+
+    probe_seq_dict = {'CASIA-B': [['nm-05', 'nm-06'], ['bg-01', 'bg-02'], ['cl-01', 'cl-02']],
                       'OUMVLP': [['00']]}
 
-    gallery_seq_dict = {'CASIA-B': [['nm-01', 'nm-02', 'nm-03', 'nm-04']],'processed_dataset':[['nm-1']],
+    gallery_seq_dict = {'CASIA-B': [['nm-01', 'nm-02', 'nm-03', 'nm-04']],
                         'OUMVLP': [['01']]}
     if dataset not in (probe_seq_dict or gallery_seq_dict):
         raise KeyError("DataSet %s hasn't been supported !" % dataset)
     num_rank = 5
     acc = np.zeros([len(probe_seq_dict[dataset]),
                     view_num, view_num, num_rank]) - 1.
-    c_index=0
     for (p, probe_seq) in enumerate(probe_seq_dict[dataset]):
         for gallery_seq in gallery_seq_dict[dataset]:
             for (v1, probe_view) in enumerate(view_list):
                 for (v2, gallery_view) in enumerate(view_list):
-                    c_index+=1
-                    true_predict=0
-                    # gseq_mask = np.isin(seq_type, gallery_seq) & np.isin(
-                    #     view, [gallery_view])
-                    # gallery_x = feature[gseq_mask, :]
-                    # gallery_y = label[gseq_mask]
-                    # true_predict+=check_is_true_label(gallery_x,gallery_y)
+                    gseq_mask = np.isin(seq_type, gallery_seq) & np.isin(
+                        view, [gallery_view])
+                    gallery_x = feature[gseq_mask, :]
+                    gallery_y = label[gseq_mask]
 
                     pseq_mask = np.isin(seq_type, probe_seq) & np.isin(
                         view, [probe_view])
                     probe_x = feature[pseq_mask, :]
                     probe_y = label[pseq_mask]
-                    true_predict+=check_is_true_label(probe_x,probe_y)
 
-                    # dist = cuda_dist(probe_x, gallery_x, metric)
-                    # idx = dist.sort(1)[1].cpu().numpy()
-                    # acc[p, v1, v2, :] = np.round(
-                    #     np.sum(np.cumsum(np.reshape(probe_y, [-1, 1]) == gallery_y[idx[:, 0:num_rank]], 1) > 0,
-                    #            0) * 100 / dist.shape[0], 2)
-                    acc[p, v1, v2, :] = np.round(true_predict/(len(probe_y)),2)
+                    dist = cuda_dist(probe_x, gallery_x, metric)
+                    idx = dist.sort(1)[1].cpu().numpy()
+                    acc[p, v1, v2, :] = np.round(
+                        np.sum(np.cumsum(np.reshape(probe_y, [-1, 1]) == gallery_y[idx[:, 0:num_rank]], 1) > 0,
+                               0) * 100 / dist.shape[0], 2)
     result_dict = {}
-    print('c_index is {}'.format(c_index))
     np.set_printoptions(precision=3, suppress=True)
     if 'OUMVLP' not in dataset:
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d (Include identical-view cases)===' % (i + 1))
-            # print(acc)
-            msg_mgr.log_info('bg: %.3f,\tnm-2: %.3f' % (
+            msg_mgr.log_info('NM: %.3f,\tBG: %.3f,\tCL: %.3f' % (
                 np.mean(acc[0, :, :, i]),
-                np.mean(acc[1, :, :, i])))
+                np.mean(acc[1, :, :, i]),
+                np.mean(acc[2, :, :, i])))
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d (Exclude identical-view cases)===' % (i + 1))
-            msg_mgr.log_info('bg: %.3f,\tnm-2: %.3f' % (
+            msg_mgr.log_info('NM: %.3f,\tBG: %.3f,\tCL: %.3f' % (
                 de_diag(acc[0, :, :, i]),
-                de_diag(acc[1, :, :, i])))
-        result_dict["scalar/test_accuracy/bg"] = de_diag(acc[0, :, :, i])
-        result_dict["scalar/test_accuracy/nm-2"] = de_diag(acc[1, :, :, i])
-        # result_dict["scalar/test_accuracy/ANGLE:5-19"] = de_diag(acc[2, :, :, i])
+                de_diag(acc[1, :, :, i]),
+                de_diag(acc[2, :, :, i])))
+        result_dict["scalar/test_accuracy/NM"] = de_diag(acc[0, :, :, i])
+        result_dict["scalar/test_accuracy/BG"] = de_diag(acc[1, :, :, i])
+        result_dict["scalar/test_accuracy/CL"] = de_diag(acc[2, :, :, i])
         np.set_printoptions(precision=2, floatmode='fixed')
         for i in range(1):
             msg_mgr.log_info(
                 '===Rank-%d of each angle (Exclude identical-view cases)===' % (i + 1))
-            msg_mgr.log_info('bg: {}'.format(de_diag(acc[0, :, :, i], True)))
-            msg_mgr.log_info('nm-2: {}'.format(de_diag(acc[1, :, :, i], True)))
-            # msg_mgr.log_info('ANGLE:5-19: {}'.format(de_diag(acc[2, :, :, i], True)))
+            msg_mgr.log_info('NM: {}'.format(de_diag(acc[0, :, :, i], True)))
+            msg_mgr.log_info('BG: {}'.format(de_diag(acc[1, :, :, i], True)))
+            msg_mgr.log_info('CL: {}'.format(de_diag(acc[2, :, :, i], True)))
     else:
         msg_mgr.log_info('===Rank-1 (Include identical-view cases)===')
-        msg_mgr.log_info('bg: %.3f ' % (np.mean(acc[0, :, :, 0])))
+        msg_mgr.log_info('NM: %.3f ' % (np.mean(acc[0, :, :, 0])))
         msg_mgr.log_info('===Rank-1 (Exclude identical-view cases)===')
-        msg_mgr.log_info('bg: %.3f ' % (de_diag(acc[0, :, :, 0])))
+        msg_mgr.log_info('NM: %.3f ' % (de_diag(acc[0, :, :, 0])))
         msg_mgr.log_info(
             '===Rank-1 of each angle (Exclude identical-view cases)===')
-        msg_mgr.log_info('bg: {}'.format(de_diag(acc[0, :, :, 0], True)))
-        result_dict["scalar/test_accuracy/bg"] = de_diag(acc[0, :, :, 0])
+        msg_mgr.log_info('NM: {}'.format(de_diag(acc[0, :, :, 0], True)))
+        result_dict["scalar/test_accuracy/NM"] = de_diag(acc[0, :, :, 0])
     return result_dict
+
 
 def identification_real_scene(data, dataset, metric='euc'):
     msg_mgr = get_msg_mgr()
@@ -154,10 +124,10 @@ def identification_real_scene(data, dataset, metric='euc'):
 
     gallery_seq_type = {'0001-1000': ['1', '2'],
                         "HID2021": ['0'], '0001-1000-test': ['0'],
-                        'GREW': ['01'], 'TTG-200': ['1']}
+                        'GREW': ['01']}
     probe_seq_type = {'0001-1000': ['3', '4', '5', '6'],
                       "HID2021": ['1'], '0001-1000-test': ['1'],
-                      'GREW': ['02'], 'TTG-200': ['2', '3', '4', '5', '6']}
+                      'GREW': ['02']}
 
     num_rank = 20
     acc = np.zeros([num_rank]) - 1.
@@ -305,10 +275,39 @@ def re_ranking(original_dist, query_num, k1, k2, lambda_value):
     final_dist = final_dist[:query_num, query_num:]
     return final_dist
 
+def identification_depression(data, dataset, metric='euc'):
+    msg_mgr = get_msg_mgr()
+    feature, logit, label, seq_type, view = data['embeddings'], data['logits'], data['labels'], data['types'], data['views']
+    logit = logit.mean(1)
+    total_gt_cnt = logit.shape[0]
+    normal_gt_cnt = 0
+    depression_gt_cnt = 0
+    normal_right_cnt = 0
+    depression_right_cnt = 0
+    for idx in range(total_gt_cnt):
+        #############################################################
+        str_label = label[idx]
+        if str_label.startswith('D_'):
+            gt_label = 0
+            normal_gt_cnt += 1
+        elif str_label.startswith('N_'):
+            gt_label = 1
+            depression_gt_cnt += 1
+        else:
+            print('Illegal Strlabel')
+            os._exit()
+        #############################################################
+        pred_label = np.argmax(logit[idx])
+        if gt_label == 0 and pred_label == 0:
+            normal_right_cnt += 1
+        if gt_label == 1 and pred_label == 1:
+            depression_right_cnt += 1
+        #############################################################
+    assert(normal_gt_cnt + depression_gt_cnt == total_gt_cnt)
+    total_right_cnt = normal_right_cnt + depression_right_cnt
+    print('normal_gt_cnt={}, normal_right_cnt={}, normal_right_acc={}'.format(normal_gt_cnt, normal_right_cnt, normal_right_cnt*1.0/normal_gt_cnt))
+    print('depression_gt_cnt={}, depression_right_cnt={}, depression_right_acc={}'.format(depression_gt_cnt, depression_right_cnt, depression_right_cnt*1.0/depression_gt_cnt))
+    print('total_gt_cnt={}, total_right_cnt={}, total_right_acc={}'.format(total_gt_cnt, total_right_cnt, total_right_cnt*1.0/total_gt_cnt))
 
-def mean_iou(data, dataset):
-    labels = data['mask']
-    pred = data['pred']
-    miou = MeanIOU(pred, labels)
-    get_msg_mgr().log_info('mIOU: %.3f' % (miou.mean()))
-    return {"scalar/test_accuracy/mIOU": miou}
+    result_dict = {}
+    return result_dict

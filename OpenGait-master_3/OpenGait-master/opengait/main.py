@@ -5,9 +5,6 @@ import torch
 import torch.nn as nn
 from modeling import models
 from utils import config_loader, get_ddp_module, init_seeds, params_count, get_msg_mgr
-from vision.cam import *
-from vision.utils import * 
-from torchsummary import summary
 
 parser = argparse.ArgumentParser(description='Main program for opengait.')
 parser.add_argument('--local_rank', type=int, default=0,
@@ -49,16 +46,10 @@ def run_model(cfgs, training):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     if cfgs['trainer_cfg']['fix_BN']:
         model.fix_BN()
+    print('Network Stucture:', model)
     model = get_ddp_module(model)
     msg_mgr.log_info(params_count(model))
-    # summary(model,input_size=((128,30,64,44),(128),(128),(128),(1)))
-    # print(model)
-    # for n in model.named_modules():
-    #     print(n)
     msg_mgr.log_info("Model Initialization Finished!")
-    # lxt
-    # test_model_dict=dict(type='test',arch=model,layer_name='',input_size=())
-    
 
     if training:
         Model.run_train(model)

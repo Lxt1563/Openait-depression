@@ -2,7 +2,7 @@ import torch
 
 from ..base_model import BaseModel
 from ..modules import SetBlockWrapper, HorizontalPoolingPyramid, PackSequenceWrapper, SeparateFCs, SeparateBNNecks
-import matplotlib.pyplot as plt
+
 
 class Baseline(BaseModel):
 
@@ -19,40 +19,37 @@ class Baseline(BaseModel):
 
         sils = ipts[0]
         if len(sils.size()) == 4:
-            sils = sils.unsqueeze(1)
-        # np.save('./pics/rawpic')
-        # print('input size is {}',format(sils.shape))
+            sils = sils.unsqueeze(2)
+
         del ipts
-        outs = self.Backbone(sils)  # [n, c, s, h, w]
+        outs = self.Backbone(sils)  # [n, s, c, h, w]
 
         # Temporal Pooling, TP
-        outs = self.TP(outs, seqL, options={"dim": 2})[0]  # [n, c, h, w]
+        outs = self.TP(outs, seqL, dim=1)[0]  # [n, c, h, w]
         # Horizontal Pooling Matching, HPM
         feat = self.HPP(outs)  # [n, c, p]
+        feat = feat.permute(2, 0, 1).contiguous()  # [p, n, c]
 
-        embed_1 = self.FCs(feat)  # [n, c]
-        #[ n,c,p]
+        embed_1 = self.FCs(feat)  # [p, n, c]
+        embed_2, logits = self.BNNecks(embed_1)  # [p, n, c]
 
-        embed_2, logits = self.BNNecks(embed_1)  # [n, c, p]
-        #[logits: batchsize,2]
+        embed_1 = embed_1.permute(1, 0, 2).contiguous()  # [n, p, c]
+        embed_2 = embed_2.permute(1, 0, 2).contiguous()  # [n, p, c]
+        logits = logits.permute(1, 0, 2).contiguous()  # [n, p, c]
+        embed = embed_1
 
-
-        # embed = embed_1
-        
-        n, _, s, h, w = sils.size()
-        # print(embed.shape)
-        
+        n, s, _, h, w = sils.size()
         retval = {
             'training_feat': {
-                # 'triplet': {'embeddings': embed_1, 'labels': labs},
+                'triplet': {'embeddings': embed_1, 'labels': labs},
                 'softmax': {'logits': logits, 'labels': labs}
             },
             'visual_summary': {
                 'image/sils': sils.view(n*s, 1, h, w)
             },
             'inference_feat': {
-                 'embeddings': logits
-                 # 'embeddings': embed
+                'embeddings': embed,
+                'logits': logits
             }
         }
         return retval
